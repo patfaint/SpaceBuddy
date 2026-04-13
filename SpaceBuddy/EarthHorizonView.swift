@@ -256,7 +256,7 @@ public struct EarthHorizonView: View {
     ///
     /// Two shells are stacked (outer halo + inner scattering) to reproduce
     /// the soft blue limb glow visible in the reference screenshot.
-    /// `UnlitMaterial` with additive blending is used so the atmosphere
+    /// `UnlitMaterial` with transparent blending is used so the atmosphere
     /// glows independently of the directional sun — physically this
     /// corresponds to Rayleigh scattering which is view-angle-dependent.
     private static func makeAtmosphereShell(
@@ -266,16 +266,17 @@ public struct EarthHorizonView: View {
     ) -> ModelEntity {
         var mat = UnlitMaterial()
         mat.color    = .init(tint: color)
-        // Additive blending: the shell accumulates along the limb where many
-        // layers of atmosphere overlap, creating the characteristic bright ring.
-        mat.blending = .additive
+        // Transparent blending lets the shell accumulate along the limb where
+        // many layers of atmosphere overlap, creating the characteristic bright
+        // ring.  OpacityComponent (set below) controls the final rendered alpha.
+        mat.blending = .transparent(opacity: 1.0)
 
         let entity = ModelEntity(
             mesh: .generateSphere(radius: radius),
             materials: [mat]
         )
         // OpacityComponent multiplies the final rendered alpha so the
-        // additive contribution stays subtle rather than washing out the scene.
+        // additive-like contribution stays subtle rather than washing out the scene.
         entity.components.set(OpacityComponent(opacity: opacity))
         return entity
     }
