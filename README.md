@@ -72,7 +72,7 @@ To move the satellite marker, update `markerCoordinate`; the `RealityView` updat
 | **Ocean reflectivity** | `earth_roughness` → PBR `roughness` (dark = smooth ocean, bright = matte land) |
 | **City lights** | `earth_nightmap` → PBR `emissiveColor`; 10 000 lux sun overpowers emissive on day side so lights appear only in darkness — no shader needed |
 | **Cloud layer** | Separate sphere at 1.01× radius; `earth_clouds` greyscale mask drives PBR `opacity` |
-| **Atmosphere glow** | Two-shell `UnlitMaterial` + additive blending + `OpacityComponent`; limb brightness accumulates at the edges naturally |
+| **Atmosphere glow** | Two-shell `UnlitMaterial` + transparent blending + `OpacityComponent`; limb brightness accumulates at the edges naturally |
 | **Terminator line** | `DirectionalLightComponent` (10 000 lux, warm white) with shadow enabled |
 | **Night-side fill** | `PointLightComponent` (120 lux, cool blue) on the opposite side — simulates moonlight/earthshine |
 | **Camera** | `PerspectiveCameraComponent` FOV 55°, altitude +0.45, pitch −12° so the curved horizon sits in the lower half |
