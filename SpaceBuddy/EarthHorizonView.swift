@@ -199,8 +199,8 @@ public struct EarthHorizonView: View {
     // MARK: - Cloud layer
 
     /// A semi-transparent sphere slightly above the surface carrying the
-    /// NASA cloud-cover mask.  The cloud texture's luminance drives opacity
-    /// via the material's `opacity` slot so clear sky stays transparent.
+    /// NASA cloud-cover mask.  When the texture is present it replaces the
+    /// white base colour; the `blending` value keeps the layer translucent.
     private static func makeClouds(radius: Float) async -> ModelEntity {
         var mat = PhysicallyBasedMaterial()
         mat.baseColor = .init(tint: UIColor(white: 1, alpha: 1))
@@ -208,8 +208,8 @@ public struct EarthHorizonView: View {
         mat.metallic  = .init(floatLiteral: 0.00)
 
         if let tex = try? await TextureResource(named: "earth_clouds") {
-            // Red channel of the greyscale cloud mask controls opacity.
-            mat.opacity = .init(texture: .init(tex))
+            // Cloud mask: white = cloud, black = clear sky.
+            mat.baseColor = .init(texture: .init(tex))
         }
         // Even without a texture, a lightly transparent shell is visible.
         mat.blending = .transparent(opacity: .init(floatLiteral: 0.82))
@@ -238,7 +238,7 @@ public struct EarthHorizonView: View {
         mat.color    = .init(tint: color)
         // Additive blending: the shell accumulates along the limb where many
         // layers of atmosphere overlap, creating the characteristic bright ring.
-        mat.blending = .add
+        mat.blending = .additive
 
         let entity = ModelEntity(
             mesh: .generateSphere(radius: radius),
@@ -304,9 +304,9 @@ public struct EarthHorizonView: View {
         // Shadow from the sun lets the cloud layer cast subtle shadows and
         // ensures the night side is properly dark without a fill-light leak.
         var shadow = DirectionalLightComponent.Shadow()
-        shadow.maximumDistance = 25
-        shadow.depthBias       = 2.0
-        light.shadow = shadow
+        shadow.shadowProjection = .automatic(maximumDistance: 25)
+        shadow.depthBias        = 2.0
+        entity.components.set(shadow)
 
         entity.components.set(light)
 
@@ -356,7 +356,7 @@ public struct EarthHorizonView: View {
 
         entity.position = SIMD3<Float>(0, earthRadius + 0.45, 0.35)
         entity.orientation = simd_quatf(
-            angle: Float(-12 * .pi / 180),
+            angle: -12.0 * Float.pi / 180.0,
             axis:  SIMD3<Float>(1, 0, 0)
         )
         return entity
