@@ -1,18 +1,28 @@
 import SwiftUI
 import RealityKit
+import CoreImage
 
 /// A full-screen SwiftUI view that renders a 3-D Earth using RealityKit,
 /// styled to match Apple's *Satellite Connection* horizon UI.
 ///
 /// ## Required assets (add to Assets.xcassets)
 ///
-/// | Name | Description | Free source |
-/// |------|-------------|-------------|
-/// | `earth_daymap` | NASA Blue Marble colour map (8 192 × 4 096 px) | https://visibleearth.nasa.gov/images/57730 |
-/// | `earth_nightmap` | NASA Black Marble city-lights map (8 192 × 4 096 px) | https://visibleearth.nasa.gov/images/55167 |
-/// | `earth_normal` | Terrain normal map (4 096 × 2 048 px) | https://visibleearth.nasa.gov/images/73934 |
-/// | `earth_roughness` | Ocean/land roughness mask — dark = smooth ocean, bright = rough land (4 096 × 2 048 px) | https://visibleearth.nasa.gov/images/73963 |
-/// | `earth_clouds` | Cloud cover opacity mask (4 096 × 2 048 px) | https://visibleearth.nasa.gov/images/57747 |
+/// All textures are available from
+/// [Solar System Scope — Textures](https://www.solarsystemscope.com/textures/)
+/// under a CC BY 4.0 licence (credit: Solar System Scope / INOVE).
+///
+/// | Name | Description | Solar System Scope file |
+/// |------|-------------|------------------------|
+/// | `earth_daymap` | Day colour map (8 192 × 4 096 px) | `8k_earth_daymap.jpg` |
+/// | `earth_nightmap` | City-lights map (8 192 × 4 096 px) | `8k_earth_nightmap.jpg` |
+/// | `earth_normal` | Terrain normal map (8 192 × 4 096 px) | `8k_earth_normal_map.tif` |
+/// | `earth_roughness` **or** `earth_specular` | Ocean/land roughness mask (8 192 × 4 096 px) | `8k_earth_specular_map.tif` |
+/// | `earth_clouds` | Cloud cover opacity mask (8 192 × 4 096 px) | `8k_earth_clouds.jpg` |
+///
+/// > **Specular → roughness:** You can add the Solar System Scope specular
+/// > map directly as `earth_specular` — the code inverts it automatically at
+/// > load time. Alternatively, if you prefer to pre-invert the image yourself,
+/// > name the result `earth_roughness` and it will be used as-is.
 ///
 /// All textures fall back gracefully so the scene renders even without assets.
 ///
@@ -141,6 +151,22 @@ public struct EarthHorizonView: View {
         return root
     }
 
+    // MARK: - Texture helpers
+
+    /// Loads a texture from the asset catalogue and inverts (negates) its
+    /// colour values using Core Image, so a specular map (bright = shiny)
+    /// becomes a roughness map (bright = rough).
+    private static func loadInvertedTexture(named name: String) async -> TextureResource? {
+        guard let uiImage = UIImage(named: name),
+              let ciInput = CIImage(image: uiImage) else { return nil }
+
+        let inverted = ciInput.applyingFilter("CIColorInvert")
+        let context = CIContext()
+        guard let cgImage = context.createCGImage(inverted, from: inverted.extent) else { return nil }
+
+        return try? await TextureResource.generate(from: cgImage, options: .init(semantic: .raw))
+    }
+
     // MARK: - Earth (Req 1)
 
     /// Creates a PBR sphere representing Earth.
@@ -172,8 +198,12 @@ public struct EarthHorizonView: View {
         }
 
         // ── Roughness: ocean (dark/smooth) vs land (bright/rough) ─────────
-        // Without a texture, a mid-range uniform value is used.
+        // Accepts either a pre-inverted roughness map (`earth_roughness`) or
+        // the original specular map (`earth_specular`) which is negated at
+        // load time so bright → rough and dark → smooth.
         if let tex = try? await TextureResource(named: "earth_roughness") {
+            pbr.roughness = .init(texture: .init(tex))
+        } else if let tex = await Self.loadInvertedTexture(named: "earth_specular") {
             pbr.roughness = .init(texture: .init(tex))
         } else {
             pbr.roughness = .init(floatLiteral: 0.75)
@@ -199,8 +229,8 @@ public struct EarthHorizonView: View {
     // MARK: - Cloud layer
 
     /// A semi-transparent sphere slightly above the surface carrying the
-    /// NASA cloud-cover mask.  The cloud texture's luminance drives opacity
-    /// via the material's `opacity` slot so clear sky stays transparent.
+    /// NASA cloud-cover mask.  When the texture is present it replaces the
+    /// white base colour; the `blending` value keeps the layer translucent.
     private static func makeClouds(radius: Float) async -> ModelEntity {
         var mat = PhysicallyBasedMaterial()
         mat.baseColor = .init(tint: UIColor(white: 1, alpha: 1))
@@ -208,8 +238,8 @@ public struct EarthHorizonView: View {
         mat.metallic  = .init(floatLiteral: 0.00)
 
         if let tex = try? await TextureResource(named: "earth_clouds") {
-            // Red channel of the greyscale cloud mask controls opacity.
-            mat.opacity = .init(texture: .init(tex))
+            // Cloud mask: white = cloud, black = clear sky.
+            mat.baseColor = .init(texture: .init(tex))
         }
         // Even without a texture, a lightly transparent shell is visible.
         mat.blending = .transparent(opacity: .init(floatLiteral: 0.82))
@@ -238,7 +268,7 @@ public struct EarthHorizonView: View {
         mat.color    = .init(tint: color)
         // Additive blending: the shell accumulates along the limb where many
         // layers of atmosphere overlap, creating the characteristic bright ring.
-        mat.blending = .add
+        mat.blending = .additive
 
         let entity = ModelEntity(
             mesh: .generateSphere(radius: radius),
@@ -304,9 +334,9 @@ public struct EarthHorizonView: View {
         // Shadow from the sun lets the cloud layer cast subtle shadows and
         // ensures the night side is properly dark without a fill-light leak.
         var shadow = DirectionalLightComponent.Shadow()
-        shadow.maximumDistance = 25
-        shadow.depthBias       = 2.0
-        light.shadow = shadow
+        shadow.shadowProjection = .automatic(maximumDistance: 25)
+        shadow.depthBias        = 2.0
+        entity.components.set(shadow)
 
         entity.components.set(light)
 
@@ -356,7 +386,7 @@ public struct EarthHorizonView: View {
 
         entity.position = SIMD3<Float>(0, earthRadius + 0.45, 0.35)
         entity.orientation = simd_quatf(
-            angle: Float(-12 * .pi / 180),
+            angle: -12.0 * Float.pi / 180.0,
             axis:  SIMD3<Float>(1, 0, 0)
         )
         return entity
