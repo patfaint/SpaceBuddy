@@ -375,7 +375,8 @@ public struct EarthHorizonView: View {
     ///   to show strong curvature, not so wide as to cause fisheye distortion.
     /// - Camera sits ~7 % of Earth-radius above the surface (+0.45 units).
     /// - A small forward (+Z) offset pushes the Earth below screen centre.
-    /// - A −12° pitch (nose down) brings the horizon arc into the lower half.
+    /// - A −20° pitch (nose down) brings the horizon arc into the lower half,
+    ///   keeping it near screen centre so the Earth fills the bottom portion.
     private static func makeCamera(earthRadius: Float) -> Entity {
         let entity = Entity()
 
@@ -387,7 +388,7 @@ public struct EarthHorizonView: View {
 
         entity.position = SIMD3<Float>(0, earthRadius + 0.45, 0.35)
         entity.orientation = simd_quatf(
-            angle: -12.0 * Float.pi / 180.0,
+            angle: -20.0 * Float.pi / 180.0,
             axis:  SIMD3<Float>(1, 0, 0)
         )
         return entity
