@@ -1,5 +1,6 @@
 import SwiftUI
 import RealityKit
+import CoreImage
 
 /// A full-screen SwiftUI view that renders a 3-D Earth using RealityKit,
 /// styled to match Apple's *Satellite Connection* horizon UI.
@@ -15,12 +16,13 @@ import RealityKit
 /// | `earth_daymap` | Day colour map (8 192 × 4 096 px) | `8k_earth_daymap.jpg` |
 /// | `earth_nightmap` | City-lights map (8 192 × 4 096 px) | `8k_earth_nightmap.jpg` |
 /// | `earth_normal` | Terrain normal map (8 192 × 4 096 px) | `8k_earth_normal_map.tif` |
-/// | `earth_roughness` | Ocean/land roughness mask (8 192 × 4 096 px) | `8k_earth_specular_map.tif` *(invert first)* |
+/// | `earth_roughness` **or** `earth_specular` | Ocean/land roughness mask (8 192 × 4 096 px) | `8k_earth_specular_map.tif` |
 /// | `earth_clouds` | Cloud cover opacity mask (8 192 × 4 096 px) | `8k_earth_clouds.jpg` |
 ///
-/// > The specular map must be **inverted** before use — the PBR material
-/// > expects a roughness map (bright = rough) but the source is specular
-/// > (bright = shiny).
+/// > **Specular → roughness:** You can add the Solar System Scope specular
+/// > map directly as `earth_specular` — the code inverts it automatically at
+/// > load time. Alternatively, if you prefer to pre-invert the image yourself,
+/// > name the result `earth_roughness` and it will be used as-is.
 ///
 /// All textures fall back gracefully so the scene renders even without assets.
 ///
@@ -149,6 +151,22 @@ public struct EarthHorizonView: View {
         return root
     }
 
+    // MARK: - Texture helpers
+
+    /// Loads a texture from the asset catalogue and inverts (negates) its
+    /// colour values using Core Image, so a specular map (bright = shiny)
+    /// becomes a roughness map (bright = rough).
+    private static func loadInvertedTexture(named name: String) async -> TextureResource? {
+        guard let uiImage = UIImage(named: name),
+              let ciInput = CIImage(image: uiImage) else { return nil }
+
+        let inverted = ciInput.applyingFilter("CIColorInvert")
+        let context = CIContext()
+        guard let cgImage = context.createCGImage(inverted, from: inverted.extent) else { return nil }
+
+        return try? await TextureResource.generate(from: cgImage, options: .init(semantic: .raw))
+    }
+
     // MARK: - Earth (Req 1)
 
     /// Creates a PBR sphere representing Earth.
@@ -180,8 +198,12 @@ public struct EarthHorizonView: View {
         }
 
         // ── Roughness: ocean (dark/smooth) vs land (bright/rough) ─────────
-        // Without a texture, a mid-range uniform value is used.
+        // Accepts either a pre-inverted roughness map (`earth_roughness`) or
+        // the original specular map (`earth_specular`) which is negated at
+        // load time so bright → rough and dark → smooth.
         if let tex = try? await TextureResource(named: "earth_roughness") {
+            pbr.roughness = .init(texture: .init(tex))
+        } else if let tex = await Self.loadInvertedTexture(named: "earth_specular") {
             pbr.roughness = .init(texture: .init(tex))
         } else {
             pbr.roughness = .init(floatLiteral: 0.75)
