@@ -269,7 +269,7 @@ public struct EarthHorizonView: View {
         // Transparent blending lets the shell accumulate along the limb where
         // many layers of atmosphere overlap, creating the characteristic bright
         // ring.  OpacityComponent (set below) controls the final rendered alpha.
-        mat.blending = .transparent(opacity: .init(floatLiteral: 1.0))
+        mat.blending = .transparent(opacity: 1.0)
 
         let entity = ModelEntity(
             mesh: .generateSphere(radius: radius),
