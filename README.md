@@ -15,20 +15,24 @@ A SwiftUI + RealityKit component that renders a 3-D Earth horizon view for a sat
 
 ## Requirements
 
-- **iOS 18.0+** (uses `RealityView` and `PerspectiveCameraComponent`)
+- **iOS 26.0+** / **Xcode 26+** (uses `RealityView`, `PerspectiveCameraComponent`, `OpacityComponent`)
 - **RealityKit** framework linked in your target
-- An Xcode project / Swift Package with the two source files added
 
 ---
 
 ## Asset setup
 
-1. In your Xcode project open **Assets.xcassets**.
-2. Import a NASA Blue Marble day-map (recommended: 8 192 × 4 096 px).  
-   Free source: <https://visibleearth.nasa.gov/images/57730>
-3. Name the asset **`earth_daymap`**.
+Add the following images to **Assets.xcassets** with exactly these names:
 
-If the texture is missing the Earth falls back to a deep-ocean blue tint so the scene still renders.
+| Asset name | Description | Recommended size | Free source |
+|------------|-------------|-----------------|-------------|
+| `earth_daymap` | NASA Blue Marble colour map | 8 192 × 4 096 px | [visibleearth.nasa.gov/images/57730](https://visibleearth.nasa.gov/images/57730) |
+| `earth_nightmap` | NASA Black Marble city lights | 8 192 × 4 096 px | [visibleearth.nasa.gov/images/55167](https://visibleearth.nasa.gov/images/55167) |
+| `earth_normal` | Terrain normal map | 4 096 × 2 048 px | [visibleearth.nasa.gov/images/73934](https://visibleearth.nasa.gov/images/73934) |
+| `earth_roughness` | Ocean/land roughness mask — dark (smooth ocean) / bright (rough land) | 4 096 × 2 048 px | [visibleearth.nasa.gov/images/73963](https://visibleearth.nasa.gov/images/73963) |
+| `earth_clouds` | Cloud cover opacity mask | 4 096 × 2 048 px | [visibleearth.nasa.gov/images/57747](https://visibleearth.nasa.gov/images/57747) |
+
+All textures have graceful fallbacks so the scene renders even when assets are absent.
 
 ---
 
@@ -55,9 +59,14 @@ To move the satellite marker, update `markerCoordinate`; the `RealityView` updat
 
 | Feature | Implementation |
 |---------|---------------|
-| Earth sphere | `ModelEntity` + `PhysicallyBasedMaterial` (roughness 0.85, metallic 0.02) |
-| NASA texture | `TextureResource(named: "earth_daymap")` applied to PBR `baseColor` |
-| Terminator line | `DirectionalLightComponent` (9 000 lux) aimed from upper-right |
-| Atmosphere glow | Slightly larger sphere with `UnlitMaterial` + additive blending + `OpacityComponent(opacity: 0.20)` |
-| Camera | `PerspectiveCameraComponent` (FOV 55°) at altitude +0.45, pitched −12° so the curved horizon sits in the lower half of the screen |
-| Satellite marker | White dot + flat ring `ModelEntity`; position updated via `EarthCoordinate.toCartesian(radius:)` |
+| **Earth sphere** | `ModelEntity` + `PhysicallyBasedMaterial` |
+| **Day colour** | `earth_daymap` → PBR `baseColor` |
+| **Terrain relief** | `earth_normal` → PBR `normal` |
+| **Ocean reflectivity** | `earth_roughness` → PBR `roughness` (dark = smooth ocean, bright = matte land) |
+| **City lights** | `earth_nightmap` → PBR `emissiveColor`; 10 000 lux sun overpowers emissive on day side so lights appear only in darkness — no shader needed |
+| **Cloud layer** | Separate sphere at 1.01× radius; `earth_clouds` greyscale mask drives PBR `opacity` |
+| **Atmosphere glow** | Two-shell `UnlitMaterial` + additive blending + `OpacityComponent`; limb brightness accumulates at the edges naturally |
+| **Terminator line** | `DirectionalLightComponent` (10 000 lux, warm white) with shadow enabled |
+| **Night-side fill** | `PointLightComponent` (120 lux, cool blue) on the opposite side — simulates moonlight/earthshine |
+| **Camera** | `PerspectiveCameraComponent` FOV 55°, altitude +0.45, pitch −12° so the curved horizon sits in the lower half |
+| **Satellite marker** | White dot + flat ring; position driven by `EarthCoordinate.toCartesian(radius:)` |

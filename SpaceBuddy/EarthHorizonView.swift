@@ -4,29 +4,36 @@ import RealityKit
 /// A full-screen SwiftUI view that renders a 3-D Earth using RealityKit,
 /// styled to match Apple's *Satellite Connection* horizon UI.
 ///
-/// ## Asset setup
-/// Add a NASA Blue Marble day-map image to your asset catalogue with the
-/// name **"earth_daymap"**.  A free 8 192 × 4 096 px source is available at:
-/// https://visibleearth.nasa.gov/images/57730
+/// ## Required assets (add to Assets.xcassets)
+///
+/// | Name | Description | Free source |
+/// |------|-------------|-------------|
+/// | `earth_daymap` | NASA Blue Marble colour map (8 192 × 4 096 px) | https://visibleearth.nasa.gov/images/57730 |
+/// | `earth_nightmap` | NASA Black Marble city-lights map (8 192 × 4 096 px) | https://visibleearth.nasa.gov/images/55167 |
+/// | `earth_normal` | Terrain normal map (4 096 × 2 048 px) | https://visibleearth.nasa.gov/images/73934 |
+/// | `earth_roughness` | Ocean/land roughness mask — dark = smooth ocean, bright = rough land (4 096 × 2 048 px) | https://visibleearth.nasa.gov/images/73963 |
+/// | `earth_clouds` | Cloud cover opacity mask (4 096 × 2 048 px) | https://visibleearth.nasa.gov/images/57747 |
+///
+/// All textures fall back gracefully so the scene renders even without assets.
 ///
 /// ## Usage
 /// ```swift
 /// EarthHorizonView(markerCoordinate: EarthCoordinate(latitude: -33.87,
 ///                                                    longitude: 151.21))
 /// ```
-@available(iOS 18.0, *)
+@available(iOS 26.0, *)
 public struct EarthHorizonView: View {
 
     // MARK: - Public interface
 
-    /// Current geographic position of the satellite marker.
-    /// Changing this value causes the marker to move without rebuilding the scene.
+    /// Geographic position of the satellite marker.
+    /// Update this value to reposition the marker without rebuilding the scene.
     public var markerCoordinate: EarthCoordinate
 
     public init(
         markerCoordinate: EarthCoordinate = EarthCoordinate(
             latitude: -33.8688,
-            longitude: 151.2093
+            longitude: 151.2093   // Default: Sydney, Australia
         )
     ) {
         self.markerCoordinate = markerCoordinate
@@ -36,22 +43,24 @@ public struct EarthHorizonView: View {
 
     public var body: some View {
         ZStack {
-            // Pure-black background fills any gap between view edges and
-            // the RealityKit content, giving the appearance of deep space.
+            // Black background = deep space behind the RealityKit content.
             Color.black.ignoresSafeArea()
 
             RealityView { content in
-                // Build the full entity tree, then add the root synchronously.
-                // The scene-building is kept separate to avoid capturing the
-                // inout `content` parameter across suspension points.
-                let root = Self.buildScene()
+                // All async texture loading happens inside makeRoot().
+                // The inout `content` is only touched after every suspension
+                // point has resolved, so Swift's ownership rules are satisfied.
+                let root = await Self.makeRoot()
                 content.add(root)
             } update: { content in
-                // Reposition the marker whenever markerCoordinate changes.
+                // RealityView calls this closure whenever the parent SwiftUI
+                // state causes EarthHorizonView to be re-evaluated (i.e. when
+                // markerCoordinate changes).  Only the marker position is
+                // mutated — the rest of the scene is left untouched.
                 guard
-                    let root      = content.entities.first,
-                    let earth     = root.findEntity(named: "Earth"),
-                    let marker    = earth.findEntity(named: "SatelliteMarker")
+                    let root   = content.entities.first,
+                    let earth  = root.findEntity(named: "Earth"),
+                    let marker = earth.findEntity(named: "SatelliteMarker")
                 else { return }
 
                 marker.position = markerCoordinate.toCartesian(
@@ -64,25 +73,50 @@ public struct EarthHorizonView: View {
 
     // MARK: - Scene constants
 
+    /// Radius of the Earth sphere in scene units.
     private static let earthRadius:    Float = 6.0
+    /// How far above the surface the satellite marker floats.
     private static let markerAltitude: Float = 0.14
 
-    // MARK: - Scene assembly
+    // MARK: - Scene root
 
+    /// Builds the complete entity hierarchy and returns the root.
+    ///
+    /// Texture loads are performed here so no `inout RealityViewContent`
+    /// parameter is captured across Swift concurrency suspension points.
     @MainActor
-    private static func buildScene(in content: inout RealityViewContent) async {
+    private static func makeRoot() async -> Entity {
         let root = Entity()
 
-        // 1. Earth sphere
+        // ── Earth ─────────────────────────────────────────────────────────
         let earth = await makeEarth(radius: earthRadius)
         earth.name = "Earth"
 
-        // 3. Atmosphere shell (child of Earth so it rotates with it)
-        let atmosphere = makeAtmosphere(radius: earthRadius * 1.024)
-        atmosphere.name = "Atmosphere"
-        earth.addChild(atmosphere)
+        // ── Atmosphere (child of Earth – rotates with the globe) ──────────
+        // Outer halo: wide, very transparent rim glow.
+        let outerAtmo = makeAtmosphereShell(
+            radius: earthRadius * 1.045,
+            color:  UIColor(red: 0.20, green: 0.55, blue: 1.00, alpha: 1),
+            opacity: 0.10
+        )
+        outerAtmo.name = "AtmosphereOuter"
+        earth.addChild(outerAtmo)
 
-        // 5. Satellite marker (default position: Sydney, Australia)
+        // Inner scattering shell: tighter, slightly more opaque blue.
+        let innerAtmo = makeAtmosphereShell(
+            radius: earthRadius * 1.018,
+            color:  UIColor(red: 0.35, green: 0.68, blue: 1.00, alpha: 1),
+            opacity: 0.18
+        )
+        innerAtmo.name = "AtmosphereInner"
+        earth.addChild(innerAtmo)
+
+        // ── Cloud layer ────────────────────────────────────────────────────
+        let clouds = await makeClouds(radius: earthRadius * 1.010)
+        clouds.name = "Clouds"
+        earth.addChild(clouds)
+
+        // ── Satellite marker ───────────────────────────────────────────────
         let marker = makeSatelliteMarker(
             earthRadius: earthRadius,
             coordinate: EarthCoordinate(latitude: -33.8688, longitude: 151.2093)
@@ -90,39 +124,71 @@ public struct EarthHorizonView: View {
         marker.name = "SatelliteMarker"
         earth.addChild(marker)
 
-        // 2. Directional sun light → natural terminator (day/night line)
-        let sun = makeSunLight()
+        // ── Lighting ───────────────────────────────────────────────────────
+        // Primary: strong sun for a crisp terminator line.
+        let sun = makeSun()
+        // Secondary: faint blue-grey fill simulating reflected moonlight,
+        // so the night-side geography is barely discernible (not black void).
+        let moonlight = makeMoonlight()
 
-        // 4. Perspective camera just above the surface
+        // ── Camera ────────────────────────────────────────────────────────
         let camera = makeCamera(earthRadius: earthRadius)
 
         root.addChild(earth)
         root.addChild(sun)
+        root.addChild(moonlight)
         root.addChild(camera)
-        content.add(root)
+        return root
     }
 
-    // MARK: - Requirement 1 · Earth entity
+    // MARK: - Earth (Req 1)
 
-    /// Creates a PBR `ModelEntity` sphere textured with the NASA day-map.
+    /// Creates a PBR sphere representing Earth.
     ///
-    /// - **Roughness 0.85** – diffuse, matte look (no plastic highlights).
-    /// - **Metallic 0.02** – almost no metallic sheen.
+    /// Texture usage:
+    /// - **baseColor**      ← `earth_daymap`   (NASA Blue Marble)
+    /// - **normal**         ← `earth_normal`   (terrain relief)
+    /// - **roughness**      ← `earth_roughness` (dark = smooth ocean, bright = rough land)
+    /// - **emissiveColor**  ← `earth_nightmap` (NASA Black Marble city lights)
+    ///
+    /// The emissive city-lights are permanently active, but the 10 000 lux
+    /// directional sun completely overwhelms them on the day side, so they
+    /// only become visible in the PBR shadow — giving a natural terminator.
     private static func makeEarth(radius: Float) async -> ModelEntity {
         var pbr = PhysicallyBasedMaterial()
 
-        // Load the NASA day-map from the asset catalogue; fall back to a
-        // deep-ocean tint when the texture is absent.
-        if let texture = try? await TextureResource(named: "earth_daymap") {
-            pbr.baseColor = .init(texture: .init(texture))
+        // ── Day colour ────────────────────────────────────────────────────
+        if let tex = try? await TextureResource(named: "earth_daymap") {
+            pbr.baseColor = .init(texture: .init(tex))
         } else {
             pbr.baseColor = .init(
                 tint: UIColor(red: 0.05, green: 0.15, blue: 0.38, alpha: 1)
             )
         }
 
-        pbr.roughness = .init(floatLiteral: 0.85)
-        pbr.metallic  = .init(floatLiteral: 0.02)
+        // ── Terrain normal map ────────────────────────────────────────────
+        if let tex = try? await TextureResource(named: "earth_normal") {
+            pbr.normal = .init(texture: .init(tex))
+        }
+
+        // ── Roughness: ocean (dark/smooth) vs land (bright/rough) ─────────
+        // Without a texture, a mid-range uniform value is used.
+        if let tex = try? await TextureResource(named: "earth_roughness") {
+            pbr.roughness = .init(texture: .init(tex))
+        } else {
+            pbr.roughness = .init(floatLiteral: 0.75)
+        }
+
+        // Low metallic — Earth is not metallic; near-zero prevents plastic sheen.
+        pbr.metallic = .init(floatLiteral: 0.02)
+
+        // ── City lights (emissive) ─────────────────────────────────────────
+        // Visible only on the dark side because sunlight overpowers them
+        // during the day (no custom shader required).
+        if let tex = try? await TextureResource(named: "earth_nightmap") {
+            pbr.emissiveColor     = .init(texture: .init(tex))
+            pbr.emissiveIntensity = 0.7
+        }
 
         return ModelEntity(
             mesh: .generateSphere(radius: radius),
@@ -130,100 +196,155 @@ public struct EarthHorizonView: View {
         )
     }
 
-    // MARK: - Requirement 3 · Atmosphere
+    // MARK: - Cloud layer
 
-    /// Creates a slightly-larger, translucent sphere that simulates atmospheric
-    /// scattering.  Additive blending makes it brighter at the limb where more
-    /// atmosphere is integrated along the line of sight.
-    private static func makeAtmosphere(radius: Float) -> ModelEntity {
-        var mat = UnlitMaterial()
-        // Soft sky-blue; opacity is controlled by the blending mode below.
-        mat.color    = .init(
-            tint: UIColor(red: 0.30, green: 0.62, blue: 1.00, alpha: 1.0)
+    /// A semi-transparent sphere slightly above the surface carrying the
+    /// NASA cloud-cover mask.  The cloud texture's luminance drives opacity
+    /// via the material's `opacity` slot so clear sky stays transparent.
+    private static func makeClouds(radius: Float) async -> ModelEntity {
+        var mat = PhysicallyBasedMaterial()
+        mat.baseColor = .init(tint: UIColor(white: 1, alpha: 1))
+        mat.roughness = .init(floatLiteral: 0.95)
+        mat.metallic  = .init(floatLiteral: 0.00)
+
+        if let tex = try? await TextureResource(named: "earth_clouds") {
+            // Red channel of the greyscale cloud mask controls opacity.
+            mat.opacity = .init(texture: .init(tex))
+        }
+        // Even without a texture, a lightly transparent shell is visible.
+        mat.blending = .transparent(opacity: .init(floatLiteral: 0.82))
+
+        return ModelEntity(
+            mesh: .generateSphere(radius: radius),
+            materials: [mat]
         )
-        // Additive blending → glows brightest where it overlaps itself at the
-        // edge of the sphere, producing the characteristic horizon halo.
+    }
+
+    // MARK: - Atmosphere (Req 3)
+
+    /// Creates a single atmospheric shell.
+    ///
+    /// Two shells are stacked (outer halo + inner scattering) to reproduce
+    /// the soft blue limb glow visible in the reference screenshot.
+    /// `UnlitMaterial` with additive blending is used so the atmosphere
+    /// glows independently of the directional sun — physically this
+    /// corresponds to Rayleigh scattering which is view-angle-dependent.
+    private static func makeAtmosphereShell(
+        radius:  Float,
+        color:   UIColor,
+        opacity: Float
+    ) -> ModelEntity {
+        var mat = UnlitMaterial()
+        mat.color    = .init(tint: color)
+        // Additive blending: the shell accumulates along the limb where many
+        // layers of atmosphere overlap, creating the characteristic bright ring.
         mat.blending = .add
 
         let entity = ModelEntity(
             mesh: .generateSphere(radius: radius),
             materials: [mat]
         )
-
-        // Scale down the contribution so it reads as a subtle glow rather than
-        // an opaque shell.  OpacityComponent multiplies the rendered alpha.
-        entity.components.set(OpacityComponent(opacity: 0.20))
+        // OpacityComponent multiplies the final rendered alpha so the
+        // additive contribution stays subtle rather than washing out the scene.
+        entity.components.set(OpacityComponent(opacity: opacity))
         return entity
     }
 
-    // MARK: - Requirement 5 · Satellite marker
+    // MARK: - Satellite marker (Req 5)
 
-    /// Creates the satellite marker: a white dot with a semi-transparent outer
-    /// ring, positioned above the Earth's surface at the given coordinate.
+    /// A white dot + translucent ring entity, matching the circular marker
+    /// in Apple's Satellite Connection UI.
+    ///
+    /// Use `EarthCoordinate.toCartesian(radius:)` to reposition at runtime.
     private static func makeSatelliteMarker(
         earthRadius: Float,
-        coordinate: EarthCoordinate
+        coordinate:  EarthCoordinate
     ) -> Entity {
         let root = Entity()
 
-        // --- Inner white dot ---
-        var fill = UnlitMaterial()
-        fill.color = .init(tint: .white)
+        // ── Filled white dot ──────────────────────────────────────────────
+        var dotMat = UnlitMaterial()
+        dotMat.color = .init(tint: .white)
         let dot = ModelEntity(
             mesh: .generateSphere(radius: 0.055),
-            materials: [fill]
+            materials: [dotMat]
         )
         root.addChild(dot)
 
-        // --- Outer ring (flat, thin cylinder standing vertically) ---
-        // A very flat cylinder gives a disc; together with the dot it mimics
-        // the circular marker in Apple's Satellite Connection UI.
+        // ── Outer ring: flat cylinder acts as a disc ───────────────────────
+        // Height 0.006 gives a near-invisible thickness; radius 0.095 creates
+        // the enclosing circle visible in the reference screenshot.
         var ringMat = UnlitMaterial()
         ringMat.color    = .init(tint: UIColor.white.withAlphaComponent(0.75))
         ringMat.blending = .transparent(opacity: .init(floatLiteral: 0.75))
         let ring = ModelEntity(
-            mesh: .generateCylinder(height: 0.006, radius: 0.09),
+            mesh: .generateCylinder(height: 0.006, radius: 0.095),
             materials: [ringMat]
         )
         root.addChild(ring)
 
-        // Place the marker on the sphere surface.
         root.position = coordinate.toCartesian(radius: earthRadius + markerAltitude)
         return root
     }
 
-    // MARK: - Requirement 2 · Sun / directional light
+    // MARK: - Sun / directional light (Req 2)
 
-    /// Creates a directional light positioned to the upper-right of Earth,
-    /// producing a realistic day/night terminator line on the PBR sphere.
-    private static func makeSunLight() -> Entity {
+    /// Strong directional light that produces the day/night terminator line.
+    ///
+    /// At 10 000 lux the PBR Earth transitions sharply from lit to unlit,
+    /// creating a clean terminator.  Shadow casting is enabled to allow
+    /// the cloud layer to cast shadows onto the surface.
+    private static func makeSun() -> Entity {
         let entity = Entity()
 
         var light = DirectionalLightComponent()
-        light.color     = .init(white: 1.0, alpha: 1.0)
-        // High intensity is needed to overcome the IBL baseline and produce
-        // a strong terminator with a clean shadow transition.
-        light.intensity = 9_000
+        light.color     = UIColor(red: 1.00, green: 0.97, blue: 0.90, alpha: 1) // warm white
+        light.intensity = 10_000
+
+        // Shadow from the sun lets the cloud layer cast subtle shadows and
+        // ensures the night side is properly dark without a fill-light leak.
+        var shadow = DirectionalLightComponent.Shadow()
+        shadow.maximumDistance = 25
+        shadow.depthBias       = 2.0
+        light.shadow = shadow
+
         entity.components.set(light)
 
-        // Aim the sun from upper-right so the terminator falls across the
-        // visible hemisphere in a visually interesting way.
-        entity.look(
-            at: .zero,
-            from: SIMD3<Float>(8, 4, 6),
-            relativeTo: nil
-        )
+        // Sun is upper-right so the terminator falls across the scene
+        // in a visually interesting diagonal.
+        entity.look(at: .zero, from: SIMD3<Float>(8, 4, 6), relativeTo: nil)
         return entity
     }
 
-    // MARK: - Requirement 4 · Perspective camera
+    // MARK: - Moonlight fill
 
-    /// Creates a perspective camera positioned just above the Earth's surface.
+    /// Very dim, cool-blue point light on the night side to prevent the
+    /// dark hemisphere from being an absolute void and to faintly reveal
+    /// ocean / continent shapes — simulating Earthshine / moonlight.
+    private static func makeMoonlight() -> Entity {
+        let entity = Entity()
+
+        var light = PointLightComponent()
+        light.color             = UIColor(red: 0.55, green: 0.65, blue: 0.85, alpha: 1)
+        light.intensity         = 120            // extremely faint
+        light.attenuationRadius = 30
+
+        entity.components.set(light)
+        // Opposite side of the Earth from the sun.
+        entity.position = SIMD3<Float>(-8, -4, -6)
+        return entity
+    }
+
+    // MARK: - Perspective camera (Req 4)
+
+    /// Positions the camera just above the Earth's surface so the curved
+    /// horizon sits in the lower half of the screen with deep space above.
     ///
-    /// - FOV 55° gives a moderate "orbital" feel without excessive distortion.
-    /// - The camera is placed directly above the origin (+Y) with a small +Z
-    ///   offset and then pitched down 12°, which pushes the curved horizon into
-    ///   the lower half of the screen and leaves deep space at the top.
+    /// - **FOV 55°** gives a moderate "orbital" field of view — wide enough
+    ///   to show strong curvature, not so wide as to cause fisheye distortion.
+    /// - Camera sits ~7 % of Earth-radius above the surface (+0.45 units).
+    /// - A small forward (+Z) offset pushes the Earth below screen centre.
+    /// - A −12° pitch (nose down) brings the horizon arc into the lower half.
     private static func makeCamera(earthRadius: Float) -> Entity {
         let entity = Entity()
 
@@ -233,12 +354,7 @@ public struct EarthHorizonView: View {
         cam.fieldOfViewInDegrees = 55.0
         entity.components.set(cam)
 
-        // ~7 % above the surface — close enough to see strong curvature.
-        let altitude: Float = earthRadius + 0.45
-        // Small +Z offset so Earth fills the lower frame rather than centring.
-        entity.position = SIMD3<Float>(0, altitude, 0.35)
-
-        // Pitch forward (nose down) so the horizon arc sits in the lower half.
+        entity.position = SIMD3<Float>(0, earthRadius + 0.45, 0.35)
         entity.orientation = simd_quatf(
             angle: Float(-12 * .pi / 180),
             axis:  SIMD3<Float>(1, 0, 0)
@@ -249,7 +365,7 @@ public struct EarthHorizonView: View {
 
 // MARK: - Preview
 
-@available(iOS 18.0, *)
+@available(iOS 26.0, *)
 #Preview {
     EarthHorizonView(
         markerCoordinate: EarthCoordinate(latitude: -33.8688, longitude: 151.2093)
