@@ -26,7 +26,7 @@ Add the following images to **Assets.xcassets** with exactly these names:
 
 | Asset name | Description | Recommended size | Free source |
 |------------|-------------|-----------------|-------------|
-| `earth_daymap` | NASA Blue Marble colour map | 8 192 × 4 096 px | [visibleearth.nasa.gov/images/57730](https://visibleearth.nasa.gov/images/57730) |
+| `earth_daymap` | NASA Blue Marble 2012 colour map | 8 192 × 4 096 px | [visibleearth.nasa.gov/images/79793](https://visibleearth.nasa.gov/images/79793) |
 | `earth_nightmap` | NASA Black Marble city lights | 8 192 × 4 096 px | [visibleearth.nasa.gov/images/55167](https://visibleearth.nasa.gov/images/55167) |
 | `earth_normal` | Terrain normal map | 4 096 × 2 048 px | [visibleearth.nasa.gov/images/73934](https://visibleearth.nasa.gov/images/73934) |
 | `earth_roughness` | Ocean/land roughness mask — dark (smooth ocean) / bright (rough land) | 4 096 × 2 048 px | [visibleearth.nasa.gov/images/73963](https://visibleearth.nasa.gov/images/73963) |
