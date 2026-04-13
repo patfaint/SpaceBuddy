@@ -6,13 +6,21 @@ import RealityKit
 ///
 /// ## Required assets (add to Assets.xcassets)
 ///
-/// | Name | Description | Free source |
-/// |------|-------------|-------------|
-/// | `earth_daymap` | NASA Blue Marble colour map (8 192 × 4 096 px) | https://visibleearth.nasa.gov/images/57730 |
-/// | `earth_nightmap` | NASA Black Marble city-lights map (8 192 × 4 096 px) | https://visibleearth.nasa.gov/images/55167 |
-/// | `earth_normal` | Terrain normal map (4 096 × 2 048 px) | https://visibleearth.nasa.gov/images/73934 |
-/// | `earth_roughness` | Ocean/land roughness mask — dark = smooth ocean, bright = rough land (4 096 × 2 048 px) | https://visibleearth.nasa.gov/images/73963 |
-/// | `earth_clouds` | Cloud cover opacity mask (4 096 × 2 048 px) | https://visibleearth.nasa.gov/images/57747 |
+/// All textures are available from
+/// [Solar System Scope — Textures](https://www.solarsystemscope.com/textures/)
+/// under a CC BY 4.0 licence (credit: Solar System Scope / INOVE).
+///
+/// | Name | Description | Solar System Scope file |
+/// |------|-------------|------------------------|
+/// | `earth_daymap` | Day colour map (8 192 × 4 096 px) | `8k_earth_daymap.jpg` |
+/// | `earth_nightmap` | City-lights map (8 192 × 4 096 px) | `8k_earth_nightmap.jpg` |
+/// | `earth_normal` | Terrain normal map (8 192 × 4 096 px) | `8k_earth_normal_map.tif` |
+/// | `earth_roughness` | Ocean/land roughness mask (8 192 × 4 096 px) | `8k_earth_specular_map.tif` *(invert first)* |
+/// | `earth_clouds` | Cloud cover opacity mask (8 192 × 4 096 px) | `8k_earth_clouds.jpg` |
+///
+/// > The specular map must be **inverted** before use — the PBR material
+/// > expects a roughness map (bright = rough) but the source is specular
+/// > (bright = shiny).
 ///
 /// All textures fall back gracefully so the scene renders even without assets.
 ///
